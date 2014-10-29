@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <boost/assign/list_of.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "base58.h"
 #include "bitcoinrpc.h"
@@ -17,6 +18,19 @@ using namespace std;
 using namespace boost;
 using namespace boost::assign;
 using namespace json_spirit;
+
+// TODO could this be merged into CSignatureCache?
+struct CDataToSign
+{
+public:
+    uint256 prevTxHash;
+    unsigned int vout;
+    CScript scriptPubKey;
+    CScript redeemScript;
+    uint256 hashToSign;
+    std::vector<unsigned char> sigR;
+    std::vector<unsigned char> sigS;
+};
 
 //
 // Utilities: convert hex-encoded Values
@@ -49,6 +63,26 @@ vector<unsigned char> ParseHexV(const Value& v, string strName)
 vector<unsigned char> ParseHexO(const Object& o, string strKey)
 {
     return ParseHexV(find_value(o, strKey), strKey);
+}
+
+void DataToSignVectorToJSON(const std::vector<CDataToSign> vToSign, Array& out) 
+{
+    for (unsigned int i = 0; i < vToSign.size(); i++) 
+    {
+        Object dToSignObj;
+        const CDataToSign& dToSign = vToSign[i];
+
+        dToSignObj.push_back(Pair("txid", dToSign.prevTxHash.GetHex()));
+        dToSignObj.push_back(Pair("vout", (boost::int64_t)dToSign.vout));
+        dToSignObj.push_back(Pair("scriptPubKey", HexStr(dToSign.scriptPubKey.begin(), dToSign.scriptPubKey.end())));
+        if (!dToSign.redeemScript.empty())
+            dToSignObj.push_back(Pair("redeemScript", HexStr(dToSign.redeemScript.begin(), dToSign.redeemScript.end())));
+        dToSignObj.push_back(Pair("tosign", dToSign.hashToSign.GetHex()));
+        dToSignObj.push_back(Pair("r", HexStr(dToSign.sigR.begin(), dToSign.sigR.end())));
+        dToSignObj.push_back(Pair("s", HexStr(dToSign.sigS.begin(), dToSign.sigS.end())));
+
+        out.push_back(dToSignObj);
+    }
 }
 
 void ScriptPubKeyToJSON(const CScript& scriptPubKey, Object& out)
@@ -336,6 +370,12 @@ Value decoderawtransaction(const Array& params, bool fHelp)
     return result;
 }
 
+string TxOutMapKey(const uint256& txid, int nOut) 
+{
+    return (txid.GetHex() + boost::lexical_cast<std::string>(nOut));
+}
+
+// TODO what if sighash param doesn't match the value used for getdatatosign?
 Value signrawtransaction(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 1 || params.size() > 4)
@@ -416,6 +456,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
         EnsureWalletIsUnlocked();
 
     // Add previous txouts given in the RPC call:
+    std::map<string, CDataToSign> mSignedData;
     if (params.size() > 1 && params[1].type() != null_type)
     {
         Array prevTxs = params[1].get_array();
@@ -427,6 +468,15 @@ Value signrawtransaction(const Array& params, bool fHelp)
             Object prevOut = p.get_obj();
 
             RPCTypeCheck(prevOut, map_list_of("txid", str_type)("vout", int_type)("scriptPubKey", str_type));
+
+            // Backwards compatible because these fields aren't required. If any one is present, 
+            // however, then all three must be present. 
+            Value valToSign = find_value(prevOut, "tosign");
+            Value valR = find_value(prevOut, "r");
+            Value valS = find_value(prevOut, "s");
+            bool hasSignData = (!(valToSign == Value::null) || !(valR == Value::null) || !(valS == Value::null));
+            if (hasSignData) 
+                RPCTypeCheck(prevOut, map_list_of("tosign", str_type)("r", str_type)("s", str_type));
 
             uint256 txid = ParseHashO(prevOut, "txid");
 
@@ -457,7 +507,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
             // given), add redeemScript to the tempKeystore so it can be signed:
             if (fGivenKeys && scriptPubKey.IsPayToScriptHash())
             {
-                RPCTypeCheck(prevOut, map_list_of("txid", str_type)("vout", int_type)("scriptPubKey", str_type)("redeemScript",str_type));
+                RPCTypeCheck(prevOut, map_list_of("redeemScript",str_type));
                 Value v = find_value(prevOut, "redeemScript");
                 if (!(v == Value::null))
                 {
@@ -466,6 +516,23 @@ Value signrawtransaction(const Array& params, bool fHelp)
                     tempKeystore.AddCScript(redeemScript);
                 }
             }
+
+            if (hasSignData) {
+                CDataToSign signedData;
+
+                signedData.prevTxHash = txid;
+                signedData.vout = nOut;
+                // scriptPubKey is already stored in coins, no need to save it again here
+                signedData.hashToSign = ParseHashO(prevOut, "tosign");
+                signedData.sigR = ParseHexO(prevOut, "r");
+                signedData.sigS = ParseHexO(prevOut, "s");
+
+                const string& mapKey = TxOutMapKey(txid, nOut);
+                if (mSignedData.count(mapKey)) 
+                    throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Attempting to spend same TXO more than once. ");
+                mSignedData.insert(std::map<string, CDataToSign>::value_type(mapKey, signedData));
+            }
+            
         }
     }
 
@@ -505,17 +572,35 @@ Value signrawtransaction(const Array& params, bool fHelp)
         const CScript& prevPubKey = coins.vout[txin.prevout.n].scriptPubKey;
 
         txin.scriptSig.clear();
-        // Only sign SIGHASH_SINGLE if there's a corresponding output:
-        if (!fHashSingle || (i < mergedTx.vout.size()))
-            SignSignature(keystore, prevPubKey, mergedTx, i, nHashType);
-
-        // ... and merge in other signatures:
-        BOOST_FOREACH(const CTransaction& txv, txVariants)
+        
+        const string mKey = TxOutMapKey(txin.prevout.hash, txin.prevout.n);
+        if (mSignedData.count(mKey)) 
         {
-            txin.scriptSig = CombineSignatures(prevPubKey, mergedTx, i, txin.scriptSig, txv.vin[i].scriptSig);
+            // TODO get the r and s values into the signature some how?
+            const CDataToSign& signedData = mSignedData[mKey];
+            uint256 calculatedHashToSign = SignatureHash(signedData.scriptPubKey, mergedTx, signedData.vout, nHashType);
+            if (signedData.hashToSign != calculatedHashToSign)
+            {
+                std::cout << "given: " << signedData.hashToSign.GetHex() << std::endl;
+                std::cout << "calcu: " << calculatedHashToSign.GetHex() << std::endl;
+                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid sighash param");
+            }    
         }
-        if (!VerifyScript(txin.scriptSig, prevPubKey, mergedTx, i, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC, 0))
-            fComplete = false;
+        else 
+        {
+            // Only sign SIGHASH_SINGLE if there's a corresponding output:
+            if (!fHashSingle || (i < mergedTx.vout.size()))
+                SignSignature(keystore, prevPubKey, mergedTx, i, nHashType, true);
+
+            // ... and merge in other signatures:
+            BOOST_FOREACH(const CTransaction& txv, txVariants)
+            {
+                txin.scriptSig = CombineSignatures(prevPubKey, mergedTx, i, txin.scriptSig, txv.vin[i].scriptSig);
+            }
+            if (!VerifyScript(txin.scriptSig, prevPubKey, mergedTx, i, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC, 0))
+                fComplete = false;
+        }
+            
     }
 
     Object result;
@@ -524,6 +609,191 @@ Value signrawtransaction(const Array& params, bool fHelp)
     result.push_back(Pair("hex", HexStr(ssTx.begin(), ssTx.end())));
     result.push_back(Pair("complete", fComplete));
 
+    return result;
+}
+
+// S.M. Added this code for new RPC call
+Value getdatatosign(const Array& params, bool fHelp)
+{
+    if (fHelp || params.size() < 1 || params.size() > 3)
+        throw runtime_error(
+            "getdatatosign <hex string> [{\"txid\":txid,\"vout\":n,\"scriptPubKey\":hex,\"redeemScript\":hex},...] [sighashtype=\"ALL\"]\n"
+            "Get the data that must be signed for this transaction to become valid.\n"
+            "Second optional argument (may be null) is an array of previous transaction outputs that\n"
+            "this transaction depends on but may not yet be in the block chain.\n"
+            "Third optional argument is a string that is one of six values; ALL, NONE, SINGLE or\n"
+            "ALL|ANYONECANPAY, NONE|ANYONECANPAY, SINGLE|ANYONECANPAY.\n"
+            "Returns json array of json object, objects with keys:\n"
+            "  txid : The txid of the tx containing the output to sign for\n"
+            "  vout : The vout this tx is spending\n"
+            "  scriptPubKey : The pubkey that locks the transaction output\n"
+            "  redeemScript : The redeem script, as needed for p2sh case\n"
+            "  tosign : The data that needs to be signed to make this UTXO spend valid (or a step toward being valid)\n"
+            "  r : The r part of the ECDSA Signature, empty, to be filled in\n"
+            "  s : The s part of the ECDSA Signature, empty, to be filled in\n"
+            + HelpRequiringPassphrase());
+    
+    RPCTypeCheck(params, list_of(str_type)(array_type)(str_type), true);
+
+    vector<unsigned char> txData(ParseHexV(params[0], "argument 1"));
+    CDataStream ssData(txData, SER_NETWORK, PROTOCOL_VERSION);
+    vector<CTransaction> txVariants;
+    while (!ssData.empty())
+    {
+        try {
+            CTransaction tx;
+            ssData >> tx;
+            txVariants.push_back(tx);
+        }
+        catch (std::exception &e) {
+            throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed");
+        }
+    }
+
+    std::cout << "size of txVariants: " << txVariants.size() << std::endl;
+    if (txVariants.size() != 1)
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Missing transaction");
+
+    // mergedTx will end up with all the signatures; it
+    // starts as a clone of the rawtx:
+    CTransaction mergedTx(txVariants[0]);
+
+    // Fetch previous transactions (inputs):
+    CCoinsView viewDummy;
+    CCoinsViewCache view(viewDummy);
+    {
+        LOCK(mempool.cs);
+        CCoinsViewCache &viewChain = *pcoinsTip;
+        CCoinsViewMemPool viewMempool(viewChain, mempool);
+        view.SetBackend(viewMempool); // temporarily switch cache backend to db+mempool view
+
+        BOOST_FOREACH(const CTxIn& txin, mergedTx.vin) {
+            const uint256& prevHash = txin.prevout.hash;
+            CCoins coins;
+            view.GetCoins(prevHash, coins); // this is certainly allowed to fail
+        }
+
+        view.SetBackend(viewDummy); // switch back to avoid locking mempool for too long
+    }
+
+    int nHashType = SIGHASH_ALL;
+    if (params.size() > 2 && params[2].type() != null_type)
+    {
+        static map<string, int> mapSigHashValues =
+            boost::assign::map_list_of
+            (string("ALL"), int(SIGHASH_ALL))
+            (string("ALL|ANYONECANPAY"), int(SIGHASH_ALL|SIGHASH_ANYONECANPAY))
+            (string("NONE"), int(SIGHASH_NONE))
+            (string("NONE|ANYONECANPAY"), int(SIGHASH_NONE|SIGHASH_ANYONECANPAY))
+            (string("SINGLE"), int(SIGHASH_SINGLE))
+            (string("SINGLE|ANYONECANPAY"), int(SIGHASH_SINGLE|SIGHASH_ANYONECANPAY))
+            ;
+        string strHashType = params[2].get_str();
+        if (mapSigHashValues.count(strHashType))
+            nHashType = mapSigHashValues[strHashType];
+        else
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid sighash param");
+    }
+
+    // Add previous txouts given in the RPC call:
+    CBasicKeyStore tempKeystore;
+    if (params.size() > 1 && params[1].type() != null_type)
+    {
+        Array prevTxs = params[1].get_array();
+        BOOST_FOREACH(Value& p, prevTxs)
+        {
+            if (p.type() != obj_type)
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "expected object with {\"txid'\",\"vout\",\"scriptPubKey\"}");
+
+            Object prevOut = p.get_obj();
+
+            RPCTypeCheck(prevOut, map_list_of("txid", str_type)("vout", int_type)("scriptPubKey", str_type));
+
+            uint256 txid = ParseHashO(prevOut, "txid");
+
+            int nOut = find_value(prevOut, "vout").get_int();
+            if (nOut < 0)
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "vout must be positive");
+
+            vector<unsigned char> pkData(ParseHexO(prevOut, "scriptPubKey"));
+            CScript scriptPubKey(pkData.begin(), pkData.end());
+
+            CCoins coins;
+            if (view.GetCoins(txid, coins)) {
+                if (coins.IsAvailable(nOut) && coins.vout[nOut].scriptPubKey != scriptPubKey) {
+                    string err("Previous output scriptPubKey mismatch:\n");
+                    err = err + coins.vout[nOut].scriptPubKey.ToString() + "\nvs:\n"+
+                        scriptPubKey.ToString();
+                    throw JSONRPCError(RPC_DESERIALIZATION_ERROR, err);
+                }
+                // what todo if txid is known, but the actual output isn't?
+            }
+            if ((unsigned int)nOut >= coins.vout.size())
+                coins.vout.resize(nOut+1);
+            coins.vout[nOut].scriptPubKey = scriptPubKey;
+            coins.vout[nOut].nValue = 0; // we don't know the actual output value
+            view.SetCoins(txid, coins);
+
+            // If redeemScript given, check to make sure it has valid types
+            if (scriptPubKey.IsPayToScriptHash()) 
+            {
+                RPCTypeCheck(prevOut, map_list_of("txid", str_type)("vout", int_type)("scriptPubKey", str_type)("redeemScript",str_type));
+                Value v = find_value(prevOut, "redeemScript");
+                if (!(v == Value::null))
+                {
+                    vector<unsigned char> rsData(ParseHexV(v, "redeemScript"));
+                    CScript redeemScript(rsData.begin(), rsData.end());
+                    tempKeystore.AddCScript(redeemScript);
+                }
+            }
+        }
+    }
+
+    bool fHashSingle = ((nHashType & ~SIGHASH_ANYONECANPAY) == SIGHASH_SINGLE);
+
+    // Make the list of data to sign
+    std::vector<CDataToSign> vDataToSign;
+    for (unsigned int i = 0; i < mergedTx.vin.size(); i++)
+    {
+        // If we can't sign for SINGLE then just skip this one
+        if (fHashSingle && (i >= mergedTx.vout.size())) 
+            continue;
+
+        // If no coins, or coins are already signed, then can skip
+        CTxIn& txin = mergedTx.vin[i];
+        CCoins coins;
+        if (!view.GetCoins(txin.prevout.hash, coins) || !coins.IsAvailable(txin.prevout.n))
+            continue;
+        txin.scriptSig.clear();
+
+        // The new data to add to the vector
+        CDataToSign toSign;
+
+        toSign.prevTxHash = txin.prevout.hash;
+        toSign.vout = txin.prevout.n;
+        toSign.scriptPubKey = coins.vout[txin.prevout.n].scriptPubKey;
+
+        if (toSign.scriptPubKey.IsPayToScriptHash())
+        {
+            // tempKeyStore has a map of hash160 -> RedeemScripts 
+            // This gets the hash160 key
+            vector<vector<unsigned char> > vSolutions;
+            txnouttype whichType;
+            Solver(toSign.scriptPubKey, whichType, vSolutions);
+
+            // And this gets the RedeemScript value, putting it into toSign
+            CScript redeemScriptOut;
+            tempKeystore.GetCScript(CScriptID(uint160(vSolutions[0])), redeemScriptOut);
+            toSign.redeemScript = redeemScriptOut;
+        }
+
+        toSign.hashToSign = SignatureHash(toSign.scriptPubKey, mergedTx, toSign.vout, nHashType);
+
+        vDataToSign.push_back(toSign);
+    }
+
+    Array result;
+    DataToSignVectorToJSON(vDataToSign, result);
     return result;
 }
 

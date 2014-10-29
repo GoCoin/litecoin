@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <boost/foreach.hpp>
 #include <boost/tuple/tuple.hpp>
+#include <fstream>
 
 using namespace std;
 using namespace boost;
@@ -15,6 +16,7 @@ using namespace boost;
 #include "main.h"
 #include "sync.h"
 #include "util.h"
+
 
 bool CheckSig(vector<unsigned char> vchSig, const vector<unsigned char> &vchPubKey, const CScript &scriptCode, const CTransaction& txTo, unsigned int nIn, int nHashType, int flags);
 
@@ -832,8 +834,8 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, co
                     valtype& vchPubKey = stacktop(-1);
 
                     ////// debug print
-                    //PrintHex(vchSig.begin(), vchSig.end(), "sig: %s\n");
-                    //PrintHex(vchPubKey.begin(), vchPubKey.end(), "pubkey: %s\n");
+                    PrintHex(vchSig.begin(), vchSig.end(), "sig: %s\n");
+                    PrintHex(vchPubKey.begin(), vchPubKey.end(), "pubkey: %s\n");
 
                     // Subset of script starting at the most recent codeseparator
                     CScript scriptCode(pbegincodehash, pend);
@@ -1018,10 +1020,22 @@ uint256 SignatureHash(CScript scriptCode, const CTransaction& txTo, unsigned int
         txTmp.vin.resize(1);
     }
 
+
     // Serialize and hash
     CHashWriter ss(SER_GETHASH, 0);
     ss << txTmp << nHashType;
     return ss.GetHash();
+
+/*
+    // Serialize and hash
+    CHashWriter ss(SER_GETHASH, 0);
+    ss << txTmp << nHashType;
+
+    // S.M. Changed for debugging purposes
+    uint256 ret = ss.GetHash();
+    std::cout << "tosign: " << ret.ToString() << std::endl;
+    return ret;
+*/
 }
 
 
@@ -1245,6 +1259,18 @@ bool Sign1(const CKeyID& address, const CKeyStore& keystore, uint256 hash, int n
     vector<unsigned char> vchSig;
     if (!key.Sign(hash, vchSig))
         return false;
+
+    ofstream myfile;
+    myfile.open("outtput.txt");
+    //myfile << "priv: " << HexStr(key.GetPrivKey().begin(), key.GetPrivKey().end()) << std::endl;
+    myfile << "hash: " << hash.GetHex() << std::endl;
+    myfile << "sign: " << HexStr(vchSig.begin(), vchSig.end()) << std::endl;
+    myfile.close();
+/*
+    std::cout << "priv: " << HexStr(key.GetPrivKey().begin(), key.GetPrivKey().end()) << std::endl;
+    std::cout << "hash: " << hash.GetHex() << std::endl;
+    std::cout << "sign: " << HexStr(vchSig.begin(), vchSig.end()) << std::endl;
+*/
     vchSig.push_back((unsigned char)nHashType);
     scriptSigRet << vchSig;
 
@@ -1515,8 +1541,8 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
     return true;
 }
 
-
-bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransaction& txTo, unsigned int nIn, int nHashType)
+// S.M. added extra parameter to log hash for debugging
+bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransaction& txTo, unsigned int nIn, int nHashType, bool printHash)
 {
     assert(nIn < txTo.vin.size());
     CTxIn& txin = txTo.vin[nIn];
@@ -1524,6 +1550,11 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
     // Leave out the signature from the hash, since a signature can't sign itself.
     // The checksig op will also drop the signatures from its hash.
     uint256 hash = SignatureHash(fromPubKey, txTo, nIn, nHashType);
+
+    if (printHash) 
+    {
+        std::cout << "signrawtransaction hash: " << hash.ToString() << std::endl;
+    }
 
     txnouttype whichType;
     if (!Solver(keystore, fromPubKey, hash, nHashType, txin.scriptSig, whichType))
@@ -1539,6 +1570,11 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
         // Recompute txn hash using subscript in place of scriptPubKey:
         uint256 hash2 = SignatureHash(subscript, txTo, nIn, nHashType);
 
+        if (printHash) 
+        {
+            std::cout << "signrawtransaction p2sh hash: " << hash2.ToString() << std::endl;
+        }
+
         txnouttype subType;
         bool fSolved =
             Solver(keystore, subscript, hash2, nHashType, txin.scriptSig, subType) && subType != TX_SCRIPTHASH;
@@ -1551,14 +1587,14 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
     return VerifyScript(txin.scriptSig, fromPubKey, txTo, nIn, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC, 0);
 }
 
-bool SignSignature(const CKeyStore &keystore, const CTransaction& txFrom, CTransaction& txTo, unsigned int nIn, int nHashType)
+bool SignSignature(const CKeyStore &keystore, const CTransaction& txFrom, CTransaction& txTo, unsigned int nIn, int nHashType, bool printHash)
 {
     assert(nIn < txTo.vin.size());
     CTxIn& txin = txTo.vin[nIn];
     assert(txin.prevout.n < txFrom.vout.size());
     const CTxOut& txout = txFrom.vout[txin.prevout.n];
 
-    return SignSignature(keystore, txout.scriptPubKey, txTo, nIn, nHashType);
+    return SignSignature(keystore, txout.scriptPubKey, txTo, nIn, nHashType, printHash);
 }
 
 static CScript PushAll(const vector<valtype>& values)
