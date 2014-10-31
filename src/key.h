@@ -163,6 +163,31 @@ public:
     bool Decompress();
 };
 
+// S.M. Added for new functionality of signrawtransaction
+// class CSigner {
+// public:
+//     CSigner();
+//     // no =0 because need to be able to make dummy signer
+//     virtual bool Sign(const uint256 &hash, std::vector<unsigned char>& vchSig) const; 
+//     virtual CPubKey GetPubKey() const;
+// };
+
+// A class that only knows how to sign a single piece of data
+class CSingleSigner
+{
+private:
+    CPubKey pubKey;
+    uint256 hashToSign;
+    std::vector<unsigned char> sigR;
+    std::vector<unsigned char> sigS;
+
+public:
+    CSingleSigner();
+    CSingleSigner(const CPubKey& pubKeyVal, uint256 hashToSignVal, std::vector<unsigned char>& sigRVal, std::vector<unsigned char>& sigSVal);
+    bool Sign(const uint256 &hash, std::vector<unsigned char>& vchSig) const;
+    CPubKey GetPubKey() const;
+    uint256 GetHashToSign() const;
+};
 
 // secure_allocator is defined in allocators.h
 // CPrivKey is a serialized private key, with all parameters included (279 bytes)

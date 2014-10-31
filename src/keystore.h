@@ -30,12 +30,20 @@ public:
     virtual void GetKeys(std::set<CKeyID> &setAddress) const =0;
     virtual bool GetPubKey(const CKeyID &address, CPubKey& vchPubKeyOut) const;
 
-    // Support for BIP 0013 : see https://en.bitcoin.it/wiki/BIP_0013
+    // Support for BIP 0013 : see https://en.bitcoin.it/wiki/BIP_0013    
     virtual bool AddCScript(const CScript& redeemScript) =0;
     virtual bool HaveCScript(const CScriptID &hash) const =0;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const =0;
+
+    // S.M. For new rpc calls
+    virtual bool AddCSingleSigner(CSingleSigner& signer) =0; // Notice, can only add CSingleSigners with this method
+    virtual bool HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const =0;
+    virtual bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const =0;
+    //virtual bool GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner>& signers) const =0; // TODO
 };
 
+//typedef std::map<CKeyID, std::vector<CSingleSigner*> > SignerMap;
+typedef std::map<CKeyID, CSingleSigner> SignerMap;
 typedef std::map<CKeyID, CKey> KeyMap;
 typedef std::map<CScriptID, CScript > ScriptMap;
 
@@ -43,6 +51,7 @@ typedef std::map<CScriptID, CScript > ScriptMap;
 class CBasicKeyStore : public CKeyStore
 {
 protected:
+    SignerMap mapSigners;
     KeyMap mapKeys;
     ScriptMap mapScripts;
 
@@ -83,9 +92,16 @@ public:
         }
         return false;
     }
+
     virtual bool AddCScript(const CScript& redeemScript);
     virtual bool HaveCScript(const CScriptID &hash) const;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const;
+
+    // S.M. For new rpc calls
+    bool AddCSingleSigner(CSingleSigner& signer); // Notice, can only add CSingleSigners with this method
+    bool HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const;
+    bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const;
+    //bool GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner *>& signers) const; // TODO
 };
 
 typedef std::map<CKeyID, std::pair<CPubKey, std::vector<unsigned char> > > CryptedKeyMap;

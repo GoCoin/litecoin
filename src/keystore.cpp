@@ -51,6 +51,98 @@ bool CBasicKeyStore::GetCScript(const CScriptID &hash, CScript& redeemScriptOut)
     return false;
 }
 
+// S.M. Added these for new rpc calls
+
+// Can only add a SingleSigner with this method, but Have/GetCSigner will check in signer map and key map
+bool CBasicKeyStore::AddCSingleSigner(CSingleSigner& signer) {
+    LOCK(cs_KeyStore);
+    mapSigners[signer.GetPubKey().GetID()] = signer;
+    return true;
+}
+
+bool CBasicKeyStore::HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const {
+    bool hasSingleSigner = false;
+    {
+        LOCK(cs_KeyStore);
+        SignerMap::const_iterator si = mapSigners.find(address);
+        hasSingleSigner = (si != mapSigners.end()) && ((*si).second.GetHashToSign() == toSign);
+    }
+    return hasSingleSigner;
+}
+
+bool CBasicKeyStore::GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const {
+    bool hasSingleSigner = false;
+    {
+        LOCK(cs_KeyStore);
+        SignerMap::const_iterator si = mapSigners.find(address);
+        hasSingleSigner = (si != mapSigners.end()) && ((*si).second.GetHashToSign() == toSign);
+        if (hasSingleSigner) signer = (*si).second;
+    }
+
+    return hasSingleSigner;
+
+
+/*
+    bool hasSingleSigner = false;
+    {
+        LOCK(cs_KeyStore);
+        hasSingleSigner = mapSigners.count(address) > 0;
+    }
+
+    if (!hasSingleSigner) 
+        return HaveKey(address);
+
+    {
+        LOCK(cs_KeyStore);
+        signer = mapSigners[address];
+    }
+
+    return true;
+    
+    
+    SignerMap::const_iterator si = mapSigners.find(address);
+    if (si != mapSigners.end())
+    {
+        redeemScriptOut = (*mi).second;
+        return true;
+    }
+    return false;
+
+
+    std::vector<CSigner *> signers;
+    bool success = GetCSigners(address, toSign, signers, true);
+    if (success) *signer = signers[0];
+    return success;
+    */
+
+}
+
+// If any in mapSigners, then only return those, because this functionality needed for signrawtransaction
+/*
+bool CBasicKeyStore::GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner *>& signers, bool returnFirst) const {
+    LOCK(cs_KeyStore);
+
+    // If not in the signers map, see if we can get a CKey, as it will also be able to sign
+    if (mapSigners.count(address) == 0) 
+    {
+        CKey k;
+        bool success = GetKey(address, k);
+        if (success) signers.push_back(&k);
+        return success;
+    }
+
+    std::vector<CSingleSigner *> *vSigners = &(mapSigners[address]);
+    for (std::vector<CSingleSigner *>::iterator it=vSigners->begin(); it < vSigners->end(); ++it) 
+    {
+        if ((*it)->GetHashToSign() == toSign) 
+        {
+            signers.push_back((*it));
+            if (returnFirst) return true;
+        }
+    }
+    return !signers.empty();
+}*/
+
 bool CCryptoKeyStore::SetCrypted()
 {
     LOCK(cs_KeyStore);

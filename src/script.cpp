@@ -1252,28 +1252,49 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
 
 bool Sign1(const CKeyID& address, const CKeyStore& keystore, uint256 hash, int nHashType, CScript& scriptSigRet)
 {
-    CKey key;
-    if (!keystore.GetKey(address, key))
-        return false;
-
+    // TODO what if there is more than one signer given for a particular address?
+    // virtual bool GetCSigner(const CKeyID& address, const uint256& toSign, CSigner ** signer) =0;
     vector<unsigned char> vchSig;
-    if (!key.Sign(hash, vchSig))
-        return false;
+    
+    CSingleSigner signer;
+    bool hasSinger = keystore.GetCSingleSigner(address, hash, signer);
+    if (hasSinger)
+    {
+        if (!signer.Sign(hash, vchSig))
+            return false;
+    }
 
+    CKey key;
+    bool hasKey = keystore.GetKey(address, key);
+    if (hasKey)
+    {
+        if (!key.Sign(hash, vchSig))
+            return false;
+    }
+
+    if (!hasSinger && !hasKey)
+        return false;
+    
+    
+    
+/*
     ofstream myfile;
     myfile.open("outtput.txt");
-    //myfile << "priv: " << HexStr(key.GetPrivKey().begin(), key.GetPrivKey().end()) << std::endl;
+
     myfile << "hash: " << hash.GetHex() << std::endl;
     myfile << "sign: " << HexStr(vchSig.begin(), vchSig.end()) << std::endl;
+
+    //myfile << "priv: " << HexStr(key.GetPrivKey().begin(), key.GetPrivKey().end()) << std::endl; // Errors (because encrypted?)
+
+    myfile << "script sig: " << HexStr(scriptSigRet.begin(), scriptSigRet.end()) << std::endl;
+
+    myfile << "script sig: " << HexStr(scriptSigRet.begin(), scriptSigRet.end()) << std::endl;
     myfile.close();
-/*
-    std::cout << "priv: " << HexStr(key.GetPrivKey().begin(), key.GetPrivKey().end()) << std::endl;
-    std::cout << "hash: " << hash.GetHex() << std::endl;
-    std::cout << "sign: " << HexStr(vchSig.begin(), vchSig.end()) << std::endl;
 */
     vchSig.push_back((unsigned char)nHashType);
     scriptSigRet << vchSig;
 
+    // At end of this method, scriptSigRet has the DER encoded signature the hash type, no pub key yet
     return true;
 }
 
@@ -1551,10 +1572,7 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
     // The checksig op will also drop the signatures from its hash.
     uint256 hash = SignatureHash(fromPubKey, txTo, nIn, nHashType);
 
-    if (printHash) 
-    {
-        std::cout << "signrawtransaction hash: " << hash.ToString() << std::endl;
-    }
+    if (printHash) { std::cout << "signrawtransaction hash: " << hash.ToString() << std::endl; }
 
     txnouttype whichType;
     if (!Solver(keystore, fromPubKey, hash, nHashType, txin.scriptSig, whichType))
@@ -1570,14 +1588,11 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
         // Recompute txn hash using subscript in place of scriptPubKey:
         uint256 hash2 = SignatureHash(subscript, txTo, nIn, nHashType);
 
-        if (printHash) 
-        {
-            std::cout << "signrawtransaction p2sh hash: " << hash2.ToString() << std::endl;
-        }
+        if (printHash) { std::cout << "signrawtransaction p2sh hash: " << hash2.ToString() << std::endl; }
 
         txnouttype subType;
-        bool fSolved =
-            Solver(keystore, subscript, hash2, nHashType, txin.scriptSig, subType) && subType != TX_SCRIPTHASH;
+        bool fSolved = Solver(keystore, subscript, hash2, nHashType, txin.scriptSig, subType) && subType != TX_SCRIPTHASH;
+        
         // Append serialized subscript whether or not it is completely signed:
         txin.scriptSig << static_cast<valtype>(subscript);
         if (!fSolved) return false;
