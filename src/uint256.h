@@ -297,6 +297,8 @@ public:
 
     std::string GetHex() const
     {
+        // Why does it print this backwards?
+        // Not going to change, just add a reverse method
         char psz[sizeof(pn)*2 + 1];
         for (unsigned int i = 0; i < sizeof(pn); i++)
             sprintf(psz + i*2, "%02x", ((unsigned char*)pn)[sizeof(pn) - i - 1]);
@@ -338,6 +340,19 @@ public:
     void SetHex(const std::string& str)
     {
         SetHex(str.c_str());
+    }
+
+    // S.M. Added reversing convenience methods
+    std::string GetReverseHex() const
+    {
+        char psz[sizeof(pn)*2 + 1];
+        for (unsigned int i = 0; i < sizeof(pn); i++)
+            sprintf(psz + i*2, "%02x", ((unsigned char*)pn)[i]);
+        return std::string(psz, psz + sizeof(pn)*2);
+    }
+
+    void Reverse(base_uint& result) const {
+        result.SetHex(this->GetReverseHex());
     }
 
     std::string ToString() const

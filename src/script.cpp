@@ -1021,21 +1021,21 @@ uint256 SignatureHash(CScript scriptCode, const CTransaction& txTo, unsigned int
     }
 
 
+/*
     // Serialize and hash
     CHashWriter ss(SER_GETHASH, 0);
     ss << txTmp << nHashType;
     return ss.GetHash();
-
-/*
+*/
+    
     // Serialize and hash
     CHashWriter ss(SER_GETHASH, 0);
     ss << txTmp << nHashType;
 
     // S.M. Changed for debugging purposes
     uint256 ret = ss.GetHash();
-    std::cout << "tosign: " << ret.ToString() << std::endl;
     return ret;
-*/
+
 }
 
 
@@ -1253,48 +1253,36 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
 bool Sign1(const CKeyID& address, const CKeyStore& keystore, uint256 hash, int nHashType, CScript& scriptSigRet)
 {
     // TODO what if there is more than one signer given for a particular address?
-    // virtual bool GetCSigner(const CKeyID& address, const uint256& toSign, CSigner ** signer) =0;
     vector<unsigned char> vchSig;
+
+    bool success = false;
     
     CSingleSigner signer;
-    bool hasSinger = keystore.GetCSingleSigner(address, hash, signer);
-    if (hasSinger)
+    if (keystore.GetCSingleSigner(address, hash, signer))
     {
         if (!signer.Sign(hash, vchSig))
             return false;
+        success = true;
     }
 
-    CKey key;
-    bool hasKey = keystore.GetKey(address, key);
-    if (hasKey)
-    {
-        if (!key.Sign(hash, vchSig))
-            return false;
+    if (!success) {
+        CKey key;
+        if (keystore.GetKey(address, key))
+        {
+            if (!key.Sign(hash, vchSig))
+                return false;
+            success = true;
+        }
     }
+    
 
-    if (!hasSinger && !hasKey)
+    if (!success)
         return false;
-    
-    
-    
-/*
-    ofstream myfile;
-    myfile.open("outtput.txt");
 
-    myfile << "hash: " << hash.GetHex() << std::endl;
-    myfile << "sign: " << HexStr(vchSig.begin(), vchSig.end()) << std::endl;
-
-    //myfile << "priv: " << HexStr(key.GetPrivKey().begin(), key.GetPrivKey().end()) << std::endl; // Errors (because encrypted?)
-
-    myfile << "script sig: " << HexStr(scriptSigRet.begin(), scriptSigRet.end()) << std::endl;
-
-    myfile << "script sig: " << HexStr(scriptSigRet.begin(), scriptSigRet.end()) << std::endl;
-    myfile.close();
-*/
     vchSig.push_back((unsigned char)nHashType);
     scriptSigRet << vchSig;
 
-    // At end of this method, scriptSigRet has the DER encoded signature the hash type, no pub key yet
+    // At end of this method, scriptSigRet has the DER encoded signature and the hash type, no pub key yet
     return true;
 }
 
@@ -1328,6 +1316,7 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, uint256 hash
         return false;
 
     CKeyID keyID;
+    CPubKey pub;
     switch (whichTypeRet)
     {
     case TX_NONSTANDARD:
@@ -1339,13 +1328,21 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, uint256 hash
         keyID = CKeyID(uint160(vSolutions[0]));
         if (!Sign1(keyID, keystore, hash, nHashType, scriptSigRet))
             return false;
+
+        if (keystore.HaveCSingleSigner(keyID, hash)) 
+        {
+            CSingleSigner signer;
+            keystore.GetCSingleSigner(keyID, hash, signer);
+            pub = signer.GetPubKey();
+        }
         else
         {
-            CPubKey vch;
-            keystore.GetPubKey(keyID, vch);
-            scriptSigRet << vch;
+            keystore.GetPubKey(keyID, pub);
         }
+        
+        scriptSigRet << pub;
         return true;
+
     case TX_SCRIPTHASH:
         return keystore.GetCScript(uint160(vSolutions[0]), scriptSigRet);
 
@@ -1353,6 +1350,7 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, uint256 hash
         scriptSigRet << OP_0; // workaround CHECKMULTISIG bug
         return (SignN(vSolutions, keystore, hash, nHashType, scriptSigRet));
     }
+
     return false;
 }
 

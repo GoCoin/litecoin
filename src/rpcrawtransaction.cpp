@@ -80,7 +80,7 @@ void DataToSignVectorToJSON(const std::vector<CDataToSign> vToSign, Array& out)
         if (!dToSign.redeemScript.empty())
             dToSignObj.push_back(Pair("redeemScript", HexStr(dToSign.redeemScript.begin(), dToSign.redeemScript.end())));
         
-        dToSignObj.push_back(Pair("tosign", dToSign.hashToSign.GetHex()));
+        dToSignObj.push_back(Pair("tosign", dToSign.hashToSign.GetReverseHex()));
         dToSignObj.push_back(Pair("pubkey", HexStr(dToSign.pubKey.begin(), dToSign.pubKey.end())));
         dToSignObj.push_back(Pair("r", HexStr(dToSign.sigR.begin(), dToSign.sigR.end())));
         dToSignObj.push_back(Pair("s", HexStr(dToSign.sigS.begin(), dToSign.sigS.end())));
@@ -538,7 +538,9 @@ Value signrawtransaction(const Array& params, bool fHelp)
 
             if (hasSignData) {
                 // TODO validation of data?
-                uint256 hashToSign = ParseHashO(prevOut, "tosign");
+                // Will just give generic error for now
+                uint256 hashToSign;
+                ParseHashO(prevOut, "tosign").Reverse(hashToSign);
                 std::vector<unsigned char> pubKeyData = ParseHexO(prevOut, "pubkey");
                 CPubKey pubKey(pubKeyData.begin(), pubKeyData.end());
                 std::vector<unsigned char> sigR = ParseHexO(prevOut, "r");
@@ -590,7 +592,6 @@ Value signrawtransaction(const Array& params, bool fHelp)
         const CScript& prevPubKey = coins.vout[txin.prevout.n].scriptPubKey;
 
         txin.scriptSig.clear();
-        std::cout << "a scriptSig: " << HexStr(txin.scriptSig.begin(), txin.scriptSig.end()) << "\n";
         
         // TODO check that sighash param is same as sighash param used while siging
 
@@ -600,17 +601,17 @@ Value signrawtransaction(const Array& params, bool fHelp)
             // If can't sign with the signed data in json, then use either given keys or wallet
             // TODO Should document that the functionality is that if the data is not correct, 
             // then this will resort to trying to sign with they private keys given / wallet. 
-            if (!SignSignature(constSignedDataKeyStore, prevPubKey, mergedTx, i, nHashType, true)) 
-                SignSignature(keyStore, prevPubKey, mergedTx, i, nHashType, true);
+            if (!SignSignature(constSignedDataKeyStore, prevPubKey, mergedTx, i, nHashType, false)) 
+            {
+                SignSignature(keyStore, prevPubKey, mergedTx, i, nHashType, false);
+            }
+                
         }
-            
-        std::cout << "b scriptSig: " << HexStr(txin.scriptSig.begin(), txin.scriptSig.end()) << "\n";
 
         // ... and merge in other signatures:
         BOOST_FOREACH(const CTransaction& txv, txVariants)
         {
             txin.scriptSig = CombineSignatures(prevPubKey, mergedTx, i, txin.scriptSig, txv.vin[i].scriptSig);
-            std::cout << "c scriptSig: " << HexStr(txin.scriptSig.begin(), txin.scriptSig.end()) << "\n";
         }
         if (!VerifyScript(txin.scriptSig, prevPubKey, mergedTx, i, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC, 0))
             fComplete = false;
@@ -664,7 +665,6 @@ Value getdatatosign(const Array& params, bool fHelp)
         }
     }
 
-    std::cout << "size of txVariants: " << txVariants.size() << std::endl;
     if (txVariants.empty())
         throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Missing transaction");
 
@@ -801,12 +801,12 @@ Value getdatatosign(const Array& params, bool fHelp)
             toSign.redeemScript = redeemScriptOut;
         }
 
-        // Don't need to set pub key, will just have dummy data
+        // Don't need to set pub key, will just have empty data
 
-        toSign.hashToSign = SignatureHash(toSign.scriptPubKey, mergedTx, toSign.vout, nHashType);
+        toSign.hashToSign = SignatureHash(toSign.scriptPubKey, mergedTx, i, nHashType);
 
-        // Don't need to set sigR key, will just have dummy data
-        // Don't need to set sigS key, will just have dummy data
+        // Don't need to set sigR key, will just have empty data
+        // Don't need to set sigS key, will just have empty data
 
         vDataToSign.push_back(toSign);
     }

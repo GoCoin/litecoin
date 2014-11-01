@@ -199,7 +199,6 @@ public:
         vchSig.resize(nSize); // Make sure it is big enough
         assert(ECDSA_sign(0, (unsigned char*)&hash, sizeof(hash), &vchSig[0], &nSize, pkey));
         vchSig.resize(nSize); // Shrink to fit actual size
-        std::cout << "vchSig: " << HexStr(vchSig.begin(), vchSig.end()) << "\n";
         return true;
     }
 
@@ -273,6 +272,7 @@ CSingleSigner::CSingleSigner(const CPubKey& pubKeyVal, uint256 hashToSignVal,
 }
 
 bool CSingleSigner::Sign(const uint256 &hash, std::vector<unsigned char>& vchSig) const {
+
     if (hash != hashToSign) 
     {
         std::string errorStr("This signer only knows how to sign: ");
@@ -305,7 +305,7 @@ bool CSingleSigner::Sign(const uint256 &hash, std::vector<unsigned char>& vchSig
     vchSig.push_back((unsigned char) (32 + extraS));
     if (extraS != 0) vchSig.push_back((unsigned char) 0x00);
     vchSig.insert(vchSig.end(), sigS.begin(), sigS.end());
-
+    
     return true;
 }
 

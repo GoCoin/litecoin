@@ -78,46 +78,9 @@ bool CBasicKeyStore::GetCSingleSigner(const CKeyID& address, const uint256& toSi
         hasSingleSigner = (si != mapSigners.end()) && ((*si).second.GetHashToSign() == toSign);
         if (hasSingleSigner) signer = (*si).second;
     }
-
     return hasSingleSigner;
-
-
-/*
-    bool hasSingleSigner = false;
-    {
-        LOCK(cs_KeyStore);
-        hasSingleSigner = mapSigners.count(address) > 0;
-    }
-
-    if (!hasSingleSigner) 
-        return HaveKey(address);
-
-    {
-        LOCK(cs_KeyStore);
-        signer = mapSigners[address];
-    }
-
-    return true;
-    
-    
-    SignerMap::const_iterator si = mapSigners.find(address);
-    if (si != mapSigners.end())
-    {
-        redeemScriptOut = (*mi).second;
-        return true;
-    }
-    return false;
-
-
-    std::vector<CSigner *> signers;
-    bool success = GetCSigners(address, toSign, signers, true);
-    if (success) *signer = signers[0];
-    return success;
-    */
-
 }
 
-// If any in mapSigners, then only return those, because this functionality needed for signrawtransaction
 /*
 bool CBasicKeyStore::GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner *>& signers, bool returnFirst) const {
     LOCK(cs_KeyStore);
