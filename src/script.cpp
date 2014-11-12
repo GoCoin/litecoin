@@ -1019,22 +1019,11 @@ uint256 SignatureHash(CScript scriptCode, const CTransaction& txTo, unsigned int
         txTmp.vin[0] = txTmp.vin[nIn];
         txTmp.vin.resize(1);
     }
-
-
-/*
-    // Serialize and hash
-    CHashWriter ss(SER_GETHASH, 0);
-    ss << txTmp << nHashType;
-    return ss.GetHash();
-*/
     
     // Serialize and hash
     CHashWriter ss(SER_GETHASH, 0);
     ss << txTmp << nHashType;
-
-    // S.M. Changed for debugging purposes
-    uint256 ret = ss.GetHash();
-    return ret;
+    return ss.GetHash();
 
 }
 
@@ -1249,12 +1238,10 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, vector<vector<unsi
     return false;
 }
 
-
+// S.M. Added use of single signers
 bool Sign1(const CKeyID& address, const CKeyStore& keystore, uint256 hash, int nHashType, CScript& scriptSigRet)
 {
-    // TODO what if there is more than one signer given for a particular address?
     vector<unsigned char> vchSig;
-
     bool success = false;
     
     CSingleSigner signer;

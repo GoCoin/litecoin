@@ -164,14 +164,6 @@ public:
 };
 
 // S.M. Added for new functionality of signrawtransaction
-// class CSigner {
-// public:
-//     CSigner();
-//     // no =0 because need to be able to make dummy signer
-//     virtual bool Sign(const uint256 &hash, std::vector<unsigned char>& vchSig) const; 
-//     virtual CPubKey GetPubKey() const;
-// };
-
 // A class that only knows how to sign a single piece of data
 class CSingleSigner
 {

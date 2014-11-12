@@ -20,7 +20,7 @@ using namespace boost;
 using namespace boost::assign;
 using namespace json_spirit;
 
-// TODO could this be merged into CSignatureCache?
+// TODO could this use CSignatureCache instead?
 struct CDataToSign
 {
 public:
@@ -85,23 +85,14 @@ void DataToSignVectorToJSON(const std::vector<CDataToSign> vToSign, Array& out)
         dToSignObj.push_back(Pair("r", HexStr(dToSign.sigR.begin(), dToSign.sigR.end())));
         dToSignObj.push_back(Pair("s", HexStr(dToSign.sigS.begin(), dToSign.sigS.end())));
 
-        // TODO this only works for P2PKH, because we are just getting the 0th element
         txnouttype type;
         std::vector<CTxDestination> addresses;
         int nOut;
-        // const CScript& scriptPubKey, txnouttype& typeRet, vector<CTxDestination>& addressRet, int& nRequiredRet)
+
+        // TODO this only works for P2PKH, because we are just getting the 0th element
         if (ExtractDestinations(dToSign.scriptPubKey, type, addresses, nOut))
             dToSignObj.push_back(Pair("address", CBitcoinAddress(addresses[0]).ToString()));
         dToSignObj.push_back(Pair("type", GetTxnOutputType(type)));
-        /*
-        if (success)
-        {
-            Array a;
-            BOOST_FOREACH(const CTxDestination& addr, addresses)
-                a.push_back(CBitcoinAddress(addr).ToString());
-            dToSignObj.push_back(Pair("addresses", a));
-        }
-        */
 
         out.push_back(dToSignObj);
     }
@@ -392,7 +383,6 @@ Value decoderawtransaction(const Array& params, bool fHelp)
     return result;
 }
 
-// TODO what if sighash param doesn't match the value used for getdatatosign?
 Value signrawtransaction(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 1 || params.size() > 4)
@@ -435,7 +425,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
     CTransaction mergedTx(txVariants[0]);
     bool fComplete = true;
 
-    // Fetch previous transactions (inputs):
+    // Fetch previous transactions outputs (this tx's inputs):
     CCoinsView viewDummy;
     CCoinsViewCache view(viewDummy);
     {
@@ -473,8 +463,8 @@ Value signrawtransaction(const Array& params, bool fHelp)
         EnsureWalletIsUnlocked();
 
     // Add previous txouts given in the RPC call:
-    // Need a vector because, for multisig, there may be more than one signature for a specific TX output
     CBasicKeyStore signedDataKeyStore;
+    std::map< std::pair<uint256, int>, bool > mapSingleSignDataGiven;
     if (params.size() > 1 && params[1].type() != null_type)
     {
         Array prevTxs = params[1].get_array();
@@ -503,6 +493,9 @@ Value signrawtransaction(const Array& params, bool fHelp)
             if (nOut < 0)
                 throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "vout must be positive");
 
+            std::pair<uint256, int> keyPair(txid, nOut);
+            mapSingleSignDataGiven[keyPair] = hasSignData;
+
             vector<unsigned char> pkData(ParseHexO(prevOut, "scriptPubKey"));
             CScript scriptPubKey(pkData.begin(), pkData.end());
 
@@ -526,7 +519,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
             // given), add redeemScript to the tempKeyStore so it can be signed:
             if (fGivenKeys && scriptPubKey.IsPayToScriptHash())
             {
-                RPCTypeCheck(prevOut, map_list_of("redeemScript",str_type));
+                RPCTypeCheck(prevOut, map_list_of("txid", str_type)("vout", int_type)("scriptPubKey", str_type)("redeemScript",str_type));
                 Value v = find_value(prevOut, "redeemScript");
                 if (!(v == Value::null))
                 {
@@ -537,8 +530,6 @@ Value signrawtransaction(const Array& params, bool fHelp)
             }
 
             if (hasSignData) {
-                // TODO validation of data?
-                // Will just give generic error for now
                 uint256 hashToSign;
                 ParseHashO(prevOut, "tosign").Reverse(hashToSign);
                 std::vector<unsigned char> pubKeyData = ParseHexO(prevOut, "pubkey");
@@ -591,21 +582,20 @@ Value signrawtransaction(const Array& params, bool fHelp)
         }
         const CScript& prevPubKey = coins.vout[txin.prevout.n].scriptPubKey;
 
+        // It is cleared here to attempt to calculate a new signature, but if originally signed in 
+        // the raw hex tx given, then the signature will be put back into the scriptSig by the CombineSignatures call
         txin.scriptSig.clear();
-        
-        // TODO check that sighash param is same as sighash param used while siging
 
         // Only sign SIGHASH_SINGLE if there's a corresponding output:
+        bool fSignedWithSingleSigner = false;
         if (!fHashSingle || (i < mergedTx.vout.size()))
         {
-            // If can't sign with the signed data in json, then use either given keys or wallet
-            // TODO Should document that the functionality is that if the data is not correct, 
-            // then this will resort to trying to sign with they private keys given / wallet. 
-            if (!SignSignature(constSignedDataKeyStore, prevPubKey, mergedTx, i, nHashType, false)) 
-            {
-                SignSignature(keyStore, prevPubKey, mergedTx, i, nHashType, false);
-            }
-                
+            // If signature data was given for a particular output, then we use that only.
+            // If param is not the same as sighash param used while getting data to sign, then signing simply fails
+            std::pair<uint256, int> keyPair(txin.prevout.hash, txin.prevout.n);
+            fSignedWithSingleSigner = mapSingleSignDataGiven[keyPair];
+            const CKeyStore& keyStoreForInput = fSignedWithSingleSigner ? constSignedDataKeyStore : keyStore;
+            SignSignature(keyStoreForInput, prevPubKey, mergedTx, i, nHashType, false);
         }
 
         // ... and merge in other signatures:
@@ -613,8 +603,16 @@ Value signrawtransaction(const Array& params, bool fHelp)
         {
             txin.scriptSig = CombineSignatures(prevPubKey, mergedTx, i, txin.scriptSig, txv.vin[i].scriptSig);
         }
+
         if (!VerifyScript(txin.scriptSig, prevPubKey, mergedTx, i, SCRIPT_VERIFY_P2SH | SCRIPT_VERIFY_STRICTENC, 0))
+        {
             fComplete = false;
+            if (fSignedWithSingleSigner)
+                throw runtime_error("The tosign/pubkey/r/s combination given in input " + itostr(i) + 
+                        ", which attempts to spend output " + itostr(txin.prevout.n) + " of transaction " +
+                        txin.prevout.hash.GetHex() + " did not validate. \nThe scriptSig was: \n" + 
+                        HexStr(txin.scriptSig.begin(), txin.scriptSig.end()) + ". ");
+        }
             
     }
 
@@ -636,14 +634,16 @@ Value getdatatosign(const Array& params, bool fHelp)
             "Get the data that must be signed for this transaction to become valid.\n"
             "Second optional argument (may be null) is an array of previous transaction outputs that\n"
             "this transaction depends on but may not yet be in the block chain.\n"
+            "The second argument also serves to provide the redeemScript for a particular input in the case of P2SH.\n"
             "Third optional argument is a string that is one of six values; ALL, NONE, SINGLE or\n"
             "ALL|ANYONECANPAY, NONE|ANYONECANPAY, SINGLE|ANYONECANPAY.\n"
             "Returns json array of json object, objects with keys:\n"
             "  txid : The txid of the tx containing the output to sign for\n"
             "  vout : The vout this tx is spending\n"
             "  scriptPubKey : The pubkey that locks the transaction output\n"
-            "  redeemScript : The redeem script, as needed for p2sh case\n"
+            "  redeemScript : The redeem script, only in P2SH case\n"
             "  tosign : The data that needs to be signed to make this UTXO spend valid (or a step toward being valid)\n"
+            "  pubkey : The public key that can be used to verify the signature"
             "  r : The r part of the ECDSA Signature, empty, to be filled in\n"
             "  s : The s part of the ECDSA Signature, empty, to be filled in\n"
             + HelpRequiringPassphrase());
@@ -773,12 +773,15 @@ Value getdatatosign(const Array& params, bool fHelp)
         if (fHashSingle && (i >= mergedTx.vout.size())) 
             continue;
 
-        // If no coins, or coins are already signed, then can skip
         CTxIn& txin = mergedTx.vin[i];
         CCoins coins;
         if (!view.GetCoins(txin.prevout.hash, coins) || !coins.IsAvailable(txin.prevout.n))
             continue;
-        txin.scriptSig.clear();
+
+        // txin.scriptSig not being empty doesn't necessarily mean it is already signed correctly.
+        // Is there a better way to tell this?
+        if (!txin.scriptSig.empty())
+            continue;
 
         // The new data to add to the vector
         CDataToSign toSign;
@@ -801,13 +804,7 @@ Value getdatatosign(const Array& params, bool fHelp)
             toSign.redeemScript = redeemScriptOut;
         }
 
-        // Don't need to set pub key, will just have empty data
-
         toSign.hashToSign = SignatureHash(toSign.scriptPubKey, mergedTx, i, nHashType);
-
-        // Don't need to set sigR key, will just have empty data
-        // Don't need to set sigS key, will just have empty data
-
         vDataToSign.push_back(toSign);
     }
 

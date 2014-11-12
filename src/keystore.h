@@ -39,10 +39,8 @@ public:
     virtual bool AddCSingleSigner(CSingleSigner& signer) =0; // Notice, can only add CSingleSigners with this method
     virtual bool HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const =0;
     virtual bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const =0;
-    //virtual bool GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner>& signers) const =0; // TODO
 };
 
-//typedef std::map<CKeyID, std::vector<CSingleSigner*> > SignerMap;
 typedef std::map<CKeyID, CSingleSigner> SignerMap;
 typedef std::map<CKeyID, CKey> KeyMap;
 typedef std::map<CScriptID, CScript > ScriptMap;

@@ -81,31 +81,6 @@ bool CBasicKeyStore::GetCSingleSigner(const CKeyID& address, const uint256& toSi
     return hasSingleSigner;
 }
 
-/*
-bool CBasicKeyStore::GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner *>& signers, bool returnFirst) const {
-    LOCK(cs_KeyStore);
-
-    // If not in the signers map, see if we can get a CKey, as it will also be able to sign
-    if (mapSigners.count(address) == 0) 
-    {
-        CKey k;
-        bool success = GetKey(address, k);
-        if (success) signers.push_back(&k);
-        return success;
-    }
-
-    std::vector<CSingleSigner *> *vSigners = &(mapSigners[address]);
-    for (std::vector<CSingleSigner *>::iterator it=vSigners->begin(); it < vSigners->end(); ++it) 
-    {
-        if ((*it)->GetHashToSign() == toSign) 
-        {
-            signers.push_back((*it));
-            if (returnFirst) return true;
-        }
-    }
-    return !signers.empty();
-}*/
-
 bool CCryptoKeyStore::SetCrypted()
 {
     LOCK(cs_KeyStore);
