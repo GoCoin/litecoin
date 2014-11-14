@@ -35,8 +35,8 @@ public:
     virtual bool HaveCScript(const CScriptID &hash) const =0;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const =0;
 
-    // S.M. For new rpc calls
-    virtual bool AddCSingleSigner(CSingleSigner& signer) =0; // Notice, can only add CSingleSigners with this method
+    // S.M. For being able to use externally calculated signatures (signrawtransaction)
+    virtual bool AddCSingleSigner(CSingleSigner& signer) =0;
     virtual bool HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const =0;
     virtual bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const =0;
 };
@@ -95,11 +95,10 @@ public:
     virtual bool HaveCScript(const CScriptID &hash) const;
     virtual bool GetCScript(const CScriptID &hash, CScript& redeemScriptOut) const;
 
-    // S.M. For new rpc calls
-    bool AddCSingleSigner(CSingleSigner& signer); // Notice, can only add CSingleSigners with this method
-    bool HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const;
-    bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const;
-    //bool GetCSigners(const CKeyID& address, const uint256& toSign, std::vector<CSigner *>& signers) const; // TODO
+    // S.M. For being able to use externally calculated signatures (signrawtransaction)
+    virtual bool AddCSingleSigner(CSingleSigner& signer);
+    virtual bool HaveCSingleSigner(const CKeyID& address, const uint256& toSign) const;
+    virtual bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const;
 };
 
 typedef std::map<CKeyID, std::pair<CPubKey, std::vector<unsigned char> > > CryptedKeyMap;

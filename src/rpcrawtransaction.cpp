@@ -67,7 +67,7 @@ vector<unsigned char> ParseHexO(const Object& o, string strKey)
     return ParseHexV(find_value(o, strKey), strKey);
 }
 
-void DataToSignVectorToJSON(const std::vector<CDataToSign> vToSign, Array& out) 
+void DataToSignToJSON(const std::vector<CDataToSign> vToSign, Array& out) 
 {
     for (unsigned int i = 0; i < vToSign.size(); i++) 
     {
@@ -87,12 +87,33 @@ void DataToSignVectorToJSON(const std::vector<CDataToSign> vToSign, Array& out)
 
         txnouttype type;
         std::vector<CTxDestination> addresses;
-        int nOut;
+        int nRequired;
 
-        // TODO this only works for P2PKH, because we are just getting the 0th element
-        if (ExtractDestinations(dToSign.scriptPubKey, type, addresses, nOut))
-            dToSignObj.push_back(Pair("address", CBitcoinAddress(addresses[0]).ToString()));
-        dToSignObj.push_back(Pair("type", GetTxnOutputType(type)));
+        if (ExtractDestinations(dToSign.scriptPubKey, type, addresses, nRequired))
+        {
+            /*
+            Array a;
+            BOOST_FOREACH(const CTxDestination& addr, addresses)
+                a.push_back(CBitcoinAddress(addr).ToString());
+            */
+            switch (type)
+            {
+            case TX_NONSTANDARD: 
+                break;
+            case TX_PUBKEY: 
+                break;
+            case TX_PUBKEYHASH: 
+                dToSignObj.push_back(Pair("address", CBitcoinAddress(addresses[0]).ToString()));
+                break;
+            case TX_SCRIPTHASH: 
+                break;
+            case TX_MULTISIG: 
+                break;
+            }
+            
+        }
+
+        //dToSignObj.push_back(Pair("type", GetTxnOutputType(type)));
 
         out.push_back(dToSignObj);
     }
@@ -529,7 +550,8 @@ Value signrawtransaction(const Array& params, bool fHelp)
                 }
             }
 
-            if (hasSignData) {
+            if (hasSignData) 
+            {
                 uint256 hashToSign;
                 ParseHashO(prevOut, "tosign").Reverse(hashToSign);
                 std::vector<unsigned char> pubKeyData = ParseHexO(prevOut, "pubkey");
@@ -541,7 +563,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
 
                 signedDataKeyStore.AddCSingleSigner(singleSigner);
             }
-            
+
         }
     }
 
@@ -809,7 +831,7 @@ Value getdatatosign(const Array& params, bool fHelp)
     }
 
     Array result;
-    DataToSignVectorToJSON(vDataToSign, result);
+    DataToSignToJSON(vDataToSign, result);
     return result;
 }
 

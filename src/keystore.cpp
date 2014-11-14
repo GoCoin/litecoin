@@ -51,9 +51,8 @@ bool CBasicKeyStore::GetCScript(const CScriptID &hash, CScript& redeemScriptOut)
     return false;
 }
 
-// S.M. Added these for new rpc calls
+// S.M. Added these for being able to use externally calculated signatures (signrawtransaction)
 
-// Can only add a SingleSigner with this method, but Have/GetCSigner will check in signer map and key map
 bool CBasicKeyStore::AddCSingleSigner(CSingleSigner& signer) {
     LOCK(cs_KeyStore);
     mapSigners[signer.GetPubKey().GetID()] = signer;

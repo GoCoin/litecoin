@@ -351,7 +351,8 @@ public:
         return std::string(psz, psz + sizeof(pn)*2);
     }
 
-    void Reverse(base_uint& result) const {
+    void Reverse(base_uint& result) const 
+    {
         result.SetHex(this->GetReverseHex());
     }
 

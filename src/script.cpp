@@ -834,8 +834,8 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, co
                     valtype& vchPubKey = stacktop(-1);
 
                     ////// debug print
-                    PrintHex(vchSig.begin(), vchSig.end(), "sig: %s\n");
-                    PrintHex(vchPubKey.begin(), vchPubKey.end(), "pubkey: %s\n");
+                    //PrintHex(vchSig.begin(), vchSig.end(), "sig: %s\n");
+                    //PrintHex(vchPubKey.begin(), vchPubKey.end(), "pubkey: %s\n");
 
                     // Subset of script starting at the most recent codeseparator
                     CScript scriptCode(pbegincodehash, pend);
@@ -1329,10 +1329,8 @@ bool Solver(const CKeyStore& keystore, const CScript& scriptPubKey, uint256 hash
         
         scriptSigRet << pub;
         return true;
-
     case TX_SCRIPTHASH:
         return keystore.GetCScript(uint160(vSolutions[0]), scriptSigRet);
-
     case TX_MULTISIG:
         scriptSigRet << OP_0; // workaround CHECKMULTISIG bug
         return (SignN(vSolutions, keystore, hash, nHashType, scriptSigRet));
