@@ -485,7 +485,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
 
     // Add previous txouts given in the RPC call:
     CBasicKeyStore signedDataKeyStore;
-    std::map< std::pair<uint256, int>, bool > mapSingleSignDataGiven;
+    std::map<COutPoint, bool> mapSingleSignDataGiven;
     if (params.size() > 1 && params[1].type() != null_type)
     {
         Array prevTxs = params[1].get_array();
@@ -514,8 +514,8 @@ Value signrawtransaction(const Array& params, bool fHelp)
             if (nOut < 0)
                 throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "vout must be positive");
 
-            std::pair<uint256, int> keyPair(txid, nOut);
-            mapSingleSignDataGiven[keyPair] = hasSignData;
+            COutPoint prevOutPt(txid, nOut);
+            mapSingleSignDataGiven[prevOutPt] = hasSignData;
 
             vector<unsigned char> pkData(ParseHexO(prevOut, "scriptPubKey"));
             CScript scriptPubKey(pkData.begin(), pkData.end());
@@ -614,8 +614,7 @@ Value signrawtransaction(const Array& params, bool fHelp)
         {
             // If signature data was given for a particular output, then we use that only.
             // If param is not the same as sighash param used while getting data to sign, then signing simply fails
-            std::pair<uint256, int> keyPair(txin.prevout.hash, txin.prevout.n);
-            fSignedWithSingleSigner = mapSingleSignDataGiven[keyPair];
+            fSignedWithSingleSigner = mapSingleSignDataGiven[txin.prevout];
             const CKeyStore& keyStoreForInput = fSignedWithSingleSigner ? constSignedDataKeyStore : keyStore;
             SignSignature(keyStoreForInput, prevPubKey, mergedTx, i, nHashType, false);
         }

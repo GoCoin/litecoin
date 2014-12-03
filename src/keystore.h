@@ -41,7 +41,7 @@ public:
     virtual bool GetCSingleSigner(const CKeyID& address, const uint256& toSign, CSingleSigner& signer) const =0;
 };
 
-typedef std::map<CKeyID, CSingleSigner> SignerMap;
+typedef std::map<std::pair<CKeyID, uint256>, CSingleSigner> SignerMap;
 typedef std::map<CKeyID, CKey> KeyMap;
 typedef std::map<CScriptID, CScript > ScriptMap;
 

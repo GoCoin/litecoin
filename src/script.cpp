@@ -1261,7 +1261,6 @@ bool Sign1(const CKeyID& address, const CKeyStore& keystore, uint256 hash, int n
             success = true;
         }
     }
-    
 
     if (!success)
         return false;
@@ -1555,7 +1554,7 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
     // The checksig op will also drop the signatures from its hash.
     uint256 hash = SignatureHash(fromPubKey, txTo, nIn, nHashType);
 
-    if (printHash) { std::cout << "signrawtransaction hash: " << hash.ToString() << std::endl; }
+    if (printHash) { std::cout << "signrawtransaction hash: " << hash.GetReverseHex() << std::endl; }
 
     txnouttype whichType;
     if (!Solver(keystore, fromPubKey, hash, nHashType, txin.scriptSig, whichType))
@@ -1571,7 +1570,7 @@ bool SignSignature(const CKeyStore &keystore, const CScript& fromPubKey, CTransa
         // Recompute txn hash using subscript in place of scriptPubKey:
         uint256 hash2 = SignatureHash(subscript, txTo, nIn, nHashType);
 
-        if (printHash) { std::cout << "signrawtransaction p2sh hash: " << hash2.ToString() << std::endl; }
+        if (printHash) { std::cout << "signrawtransaction hash: " << hash2.GetReverseHex() << std::endl; }
 
         txnouttype subType;
         bool fSolved = Solver(keystore, subscript, hash2, nHashType, txin.scriptSig, subType) && subType != TX_SCRIPTHASH;

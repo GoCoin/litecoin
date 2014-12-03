@@ -55,7 +55,7 @@ bool CBasicKeyStore::GetCScript(const CScriptID &hash, CScript& redeemScriptOut)
 
 bool CBasicKeyStore::AddCSingleSigner(CSingleSigner& signer) {
     LOCK(cs_KeyStore);
-    mapSigners[signer.GetPubKey().GetID()] = signer;
+    mapSigners[std::make_pair(signer.GetPubKey().GetID(), signer.GetHashToSign())] = signer;
     return true;
 }
 
@@ -63,7 +63,7 @@ bool CBasicKeyStore::HaveCSingleSigner(const CKeyID& address, const uint256& toS
     bool hasSingleSigner = false;
     {
         LOCK(cs_KeyStore);
-        SignerMap::const_iterator si = mapSigners.find(address);
+        SignerMap::const_iterator si = mapSigners.find(std::make_pair(address, toSign));
         hasSingleSigner = (si != mapSigners.end()) && ((*si).second.GetHashToSign() == toSign);
     }
     return hasSingleSigner;
@@ -73,7 +73,7 @@ bool CBasicKeyStore::GetCSingleSigner(const CKeyID& address, const uint256& toSi
     bool hasSingleSigner = false;
     {
         LOCK(cs_KeyStore);
-        SignerMap::const_iterator si = mapSigners.find(address);
+        SignerMap::const_iterator si = mapSigners.find(std::make_pair(address, toSign));
         hasSingleSigner = (si != mapSigners.end()) && ((*si).second.GetHashToSign() == toSign);
         if (hasSingleSigner) signer = (*si).second;
     }
