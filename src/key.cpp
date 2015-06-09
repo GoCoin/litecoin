@@ -271,41 +271,58 @@ CSingleSigner::CSingleSigner(const CPubKey& pubKeyVal, uint256 hashToSignVal,
     sigS = sigSVal;
 }
 
+static bool PushSigComponent(std::vector<unsigned char>& vchSig, const std::vector<unsigned char>& vchComponent) {
+    if (vchComponent.size() != 32)
+        return false;
+
+    int len = 32;
+    for (size_t i = 0; i < 32; i++)
+    {
+        if (vchComponent[i] == 0)
+        {
+            len--;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    if (len <= 0)
+        return false;
+
+    int extra = vchComponent[32-len] > 0x7f ? 1 : 0;
+
+    vchSig.push_back((unsigned char) 0x02);
+    vchSig.push_back((unsigned char) len + extra);
+    if (extra) vchSig.push_back((unsigned char) 0);
+    vchSig.insert(vchSig.end(), vchComponent.begin() + (32 - len), vchComponent.end());
+
+    return true;
+}
+
 bool CSingleSigner::Sign(const uint256 &hash, std::vector<unsigned char>& vchSig) const {
 
-    if (hash != hashToSign) 
+    if (hash != hashToSign)
     {
         std::string errorStr("This signer only knows how to sign: ");
         errorStr = errorStr.append(hashToSign.GetHex()).append(", and so cannot sign: ").append(hash.GetHex());
         throw std::runtime_error(errorStr);
     }
 
-    if (sigR.size() != 32 || sigS.size() != 32) 
-    {
-        std::string errorStr("Either R or S is not set properly. ");
-        errorStr = errorStr.append("R: ").append(HexStr(sigR.begin(), sigR.end()));
-        errorStr = errorStr.append("S: ").append(HexStr(sigS.begin(), sigS.end()));
-        throw std::runtime_error(errorStr);
+    if (!PushSigComponent(vchSig, sigR)) {
+        throw std::runtime_error(std::string("R not set properly. R: ") + HexStr(sigR.begin(), sigR.end()));
     }
 
-    int extraR = sigR[0] > 0x7F ? 1 : 0;
-    int extraS = sigS[0] > 0x7F ? 1 : 0;
-    int len = 68 + extraR + extraS;
+    if (!PushSigComponent(vchSig, sigS)) {
+        throw std::runtime_error(std::string("S not set properly. S: ") + HexStr(sigS.begin(), sigS.end()));
+    }
 
-    // DER encoding of R and S    
-    vchSig.push_back((unsigned char) 0x30);
-    vchSig.push_back((unsigned char) len);
-    
-    vchSig.push_back((unsigned char) 0x02);
-    vchSig.push_back((unsigned char) (32 + extraR));
-    if (extraR != 0) vchSig.push_back((unsigned char) 0x00);
-    vchSig.insert(vchSig.end(), sigR.begin(), sigR.end());
+    std::vector<unsigned char> vchTmp;
+    vchTmp.push_back((unsigned char) 0x30);
+    vchTmp.push_back((unsigned char) vchSig.size());
+    vchSig.insert(vchSig.begin(), vchTmp.begin(), vchTmp.end());
 
-    vchSig.push_back((unsigned char) 0x02);
-    vchSig.push_back((unsigned char) (32 + extraS));
-    if (extraS != 0) vchSig.push_back((unsigned char) 0x00);
-    vchSig.insert(vchSig.end(), sigS.begin(), sigS.end());
-    
     return true;
 }
 
